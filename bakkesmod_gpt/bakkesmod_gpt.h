@@ -124,6 +124,8 @@ class bakkesmod_gpt : public BakkesMod::Plugin::BakkesModPlugin/*, public Bakkes
 	virtual void onLoad();
 	virtual void onUnload();
 	void appendLog(std::string message = "Default log");
+	void deleteLog();
+	void gameState();
 	void onStatTickerMessage(void* params);
 	void onStatEvent(void* params);
 	void onPlayerMessage(void* params);

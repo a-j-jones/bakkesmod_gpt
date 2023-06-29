@@ -52,16 +52,16 @@ std::map<std::wstring, std::wstring> message_map = {
     {L"Group5Message4", L"Rematch!"},
     {L"Group5Message5", L"One. More. Game."},
     {L"Group5Message6", L"What a game!"},
-    {L"Group5Message7", L"Nice moves."},
-    {L"Group5Message8", L"Everybody dance!"},
-    {L"Group6Message1", L"Good luck!"},
-    {L"Group6Message2", L"Have fun!"},
-    {L"Group6Message3", L"Get ready."},
-    {L"Group6Message4", L"This is Rocket League!"},
-    {L"Group6Message5", L"Let's do this!"},
-    {L"Group6Message6", L"Here. We. Go."},
-    {L"Group6Message7", L"Nice cars!"},
-    {L"Group6Message8", L"I'll do my best."}
+    { L"Group5Message7", L"Nice moves." },
+    { L"Group5Message8", L"Everybody dance!" },
+    { L"Group6Message1", L"Good luck!" },
+    { L"Group6Message2", L"Have fun!" },
+    { L"Group6Message3", L"Get ready." },
+    { L"Group6Message4", L"This is Rocket League!" },
+    { L"Group6Message5", L"Let's do this!" },
+    { L"Group6Message6", L"Here. We. Go." },
+    { L"Group6Message7", L"Nice cars!" },
+    { L"Group6Message8", L"I'll do my best." }
 };
 
 
@@ -76,24 +76,43 @@ void bakkesmod_gpt::onLoad()
     // do something when it loads
     LOG("Bakkesmod_GPT has been loaded");
 
+    // Reset the log file:
+    deleteLog();
+
     cvarManager->registerNotifier("WriteToLog", [this](std::vector<std::string> args) {
         appendLog();
         }, "", PERMISSION_ALL);
 
-    //  We need the params so we hook with caller, but there is no wrapper for the HUD
+    cvarManager->registerNotifier("GameState", [this](std::vector<std::string> args) {
+        gameState();
+        }, "", PERMISSION_ALL);
+
+    // We need the params so we hook with caller, but there is no wrapper for the HUD
     gameWrapper->HookEventWithCallerPost<ServerWrapper>("Function TAGame.GFxHUD_TA.HandleStatTickerMessage",
         [this](ServerWrapper caller, void* params, std::string eventname) {
+            if (params == nullptr) {
+                LOG("NULL params passed to HandleStatTickerMessage");
+                return;
+            }
             onStatTickerMessage(params);
         });
 
-    // hooked whenever the primary player earns a stat
+    // Hooked whenever the primary player earns a stat
     gameWrapper->HookEventWithCallerPost<ServerWrapper>("Function TAGame.GFxHUD_TA.HandleStatEvent",
         [this](ServerWrapper caller, void* params, std::string eventname) {
+            if (params == nullptr) {
+                LOG("NULL params passed to HandleStatEvent");
+                return;
+            }
             onStatEvent(params);
         });
 
-    gameWrapper->HookEventWithCaller<ActorWrapper>("Function TAGame.HUDBase_TA.OnChatMessage", 
+    gameWrapper->HookEventWithCaller<ActorWrapper>("Function TAGame.HUDBase_TA.OnChatMessage",
         [this](ActorWrapper caller, void* params, ...) {
+            if (params == nullptr) {
+                LOG("NULL params passed to OnChatMessage");
+                return;
+            }
             onPlayerMessage(params);
         });
 }
@@ -102,33 +121,130 @@ void bakkesmod_gpt::onUnload() {
     LOG("Bakkesmod_GPT has been unloaded");
 }
 
+void bakkesmod_gpt::gameState() {
+    ServerWrapper server = gameWrapper->GetCurrentGameState();
+    if (!server.IsNull()) {
+        int time_left = server.GetSecondsRemaining();
+
+        if (server.GetTeams().Count() != 2) { return; }
+
+        // Get the primary player's team.
+        PlayerControllerWrapper playerController = gameWrapper->GetPlayerController();
+        if (!playerController) { LOG("Null controller"); return; }
+        PriWrapper playerPRI = playerController.GetPRI();
+        if (!playerPRI) { LOG("Null player PRI"); return; }
+        TeamInfoWrapper playerTeam = playerPRI.GetTeam();
+
+        if (!playerTeam.IsNull()) {
+            int playerTeamId = playerTeam.GetTeamIndex();
+            int opposionTeamId = 1 - playerTeamId;
+            int playerTeamScore = playerTeam.GetScore();
+
+            TeamWrapper oppositionTeam = server.GetTeams().Get(opposionTeamId);
+            if (!oppositionTeam.IsNull()) {
+                int oppositionTeamScore = oppositionTeam.GetScore();
+
+                // Open the file to overwrite.
+                std::fstream logFile("E:/Documents/My Games/Rocket League/output.txt", std::ios_base::in | std::ios_base::out);
+                if (!logFile.is_open()) {
+                    LOG("Failed to open log file");
+                    return;
+                }
+
+                std::string score = "";
+                if (playerTeamScore > oppositionTeamScore) {
+                    score = "[GAME] YOU are winning " + std::to_string(playerTeamScore) + " - " + std::to_string(oppositionTeamScore);
+                }
+                else if (playerTeamScore < oppositionTeamScore) {
+                    score = "[GAME] YOU are losing " + std::to_string(playerTeamScore) + " - " + std::to_string(oppositionTeamScore);
+				}
+                else {
+                    score = "[GAME] YOU are drawing " + std::to_string(playerTeamScore) + " - " + std::to_string(oppositionTeamScore);
+				}
+
+                std::string seconds = "[GAME] There are " + std::to_string(time_left) + " seconds remaining";
+
+                // Write to the beginning of the file with the current time [HH:MM:SS] and the message.
+                logFile.seekp(0);
+                logFile << seconds << std::endl;
+                logFile << score << std::endl;
+
+
+                // Close the file.
+                logFile.close();
+			}
+            else {
+				return;
+			}
+		}
+		else {
+			return;
+		}
+
+    }
+}
+
+
+
 void bakkesmod_gpt::onStatEvent(void* params) {
     StatEventParams* pStruct = (StatEventParams*)params;
+    if (pStruct == nullptr) {
+        LOG("NULL StatEventParams");
+        return;
+    }
     PriWrapper playerPRI = PriWrapper(pStruct->PRI);
     StatEventWrapper statEvent = StatEventWrapper(pStruct->StatEvent);
 }
 
+void bakkesmod_gpt::deleteLog() {
+    // Open the file to truncate it (recreate as a blank file).
+    std::ofstream logFile("E:/Documents/My Games/Rocket League/output.txt", std::ios_base::trunc);
+    if (!logFile.is_open()) {
+        LOG("Failed to open log file");
+        return;
+    }
+
+    // Close the file.
+    logFile.close();
+}
+
 void bakkesmod_gpt::appendLog(std::string message) {
+
+    // Update the GameState in the file.
+    gameState();
 
     // Get the current time:
     std::time_t now = std::time(nullptr);
     std::tm* timeinfo = std::localtime(&now);
+    if (timeinfo == nullptr) {
+        LOG("Cannot get current time");
+        return;
+    }
     char timeBuffer[9]; // Buffer to hold the formatted time
     std::strftime(timeBuffer, sizeof(timeBuffer), "%T", timeinfo);
 
     // Open the file to append to.
     std::ofstream logFile("E:/Documents/My Games/Rocket League/output.txt", std::ios_base::app);
+    if (!logFile.is_open()) {
+        LOG("Failed to open log file");
+        return;
+    }
 
     // Log to the file with the current time [HH:MM:SS] and the message.
     logFile << "[" << timeBuffer << "] " << message << std::endl;
 
     // Close the file.
     logFile.close();
+
 };
 
 void bakkesmod_gpt::onPlayerMessage(void* params) {
 
     FChatMessage* chatMessage = static_cast<FChatMessage*>(params);
+    if (chatMessage == nullptr) {
+        LOG("NULL FChatMessage");
+        return;
+    }
 
     std::wstring playerName(chatMessage->PlayerName);
     std::wstring message(chatMessage->Message);
@@ -144,8 +260,12 @@ void bakkesmod_gpt::onPlayerMessage(void* params) {
     appendLog(line);
 };
 
+
 // defined elsewhere in .cpp
 void bakkesmod_gpt::onStatTickerMessage(void* params) {
+
+    if (!params) { LOG("Null params pointer"); return; }
+
     struct StatTickerParams {
         uintptr_t Receiver;
         uintptr_t Victim;
@@ -156,6 +276,9 @@ void bakkesmod_gpt::onStatTickerMessage(void* params) {
     PriWrapper receiver = PriWrapper(pStruct->Receiver);
     PriWrapper victim = PriWrapper(pStruct->Victim);
     StatEventWrapper statEvent = StatEventWrapper(pStruct->StatEvent);
+
+    // Verify that the StatEventWrapper object has a valid GetEventName()
+    if (statEvent.GetEventName().empty()) { LOG("Invalid event name"); return; }
 
     // Log the event name
     LOG("StatEvent:" + statEvent.GetEventName());
@@ -172,7 +295,7 @@ void bakkesmod_gpt::onStatTickerMessage(void* params) {
     // Check if the receiver is the primary player
     std::string receiverDescription = "";
     if (playerPRI.memory_address == receiver.memory_address) {
-        receiverDescription = "YOU";
+        receiverDescription = "[YOU]";
 	}
 	else {
         TeamInfoWrapper receiverTeam = receiver.GetTeam();
@@ -180,10 +303,10 @@ void bakkesmod_gpt::onStatTickerMessage(void* params) {
 
         if (playerTeam.IsNull() == false && receiverTeam.IsNull() == false) {
             if (receiverTeam.GetTeamIndex() == playerTeam.GetTeamIndex()) {
-				receiverDescription = "TEAMMATE";
+                receiverDescription = receiver.GetPlayerName().ToString() + " [TEAMMATE]";
 			}
 			else {
-				receiverDescription = "OPPONENT";
+                receiverDescription = receiver.GetPlayerName().ToString() + " [OPPONENT]";
 			}
         }
 	}
@@ -194,42 +317,52 @@ void bakkesmod_gpt::onStatTickerMessage(void* params) {
         std::string line = "";
         if (!victim) { LOG("Null victim PRI"); return; }
         if (playerPRI.memory_address == victim.memory_address) {
-            line = receiver.GetPlayerName().ToString() + " [" + receiverDescription + "]" + " demolished " + victim.GetPlayerName().ToString() + " [YOU]";
+            line = receiverDescription + " demolished " + " [YOU]";
         }
         else {
-            line = receiver.GetPlayerName().ToString() + " [" + receiverDescription + "]" + " demolished " + victim.GetPlayerName().ToString();
+            line = receiverDescription + " demolished " + victim.GetPlayerName().ToString();
         }
         
         LOG(line);
         appendLog(line);
     }
     else if (statEvent.GetEventName() == "Goal") {
-        std::string line = receiver.GetPlayerName().ToString() + " [" + receiverDescription + "]" + " scored a goal";
+        std::string line = receiverDescription + " scored a goal";
         LOG(line);
         appendLog(line);
     }
     else if (statEvent.GetEventName() == "OvertimeGoal") {
-        std::string line = receiver.GetPlayerName().ToString() + " [" + receiverDescription + "]" + " scored an overtime goal";
+        std::string line = receiverDescription + " scored an overtime goal";
         LOG(line);
         appendLog(line);
     }
     else if (statEvent.GetEventName() == "Assist") {
-        std::string line = receiver.GetPlayerName().ToString() + " [" + receiverDescription + "]" + " made an assist";
+        std::string line = receiverDescription + " made an assist";
         LOG(line);
         appendLog(line);
     }
     else if (statEvent.GetEventName() == "Save") {
-        std::string line = receiver.GetPlayerName().ToString() + " [" + receiverDescription + "]" + " made a save";
+        std::string line = receiverDescription + " made a save";
         LOG(line);
         appendLog(line);
     }
     else if (statEvent.GetEventName() == "EpicSave") {
-        std::string line = receiver.GetPlayerName().ToString() + " [" + receiverDescription + "]" + " made an epic save";
+        std::string line = receiverDescription + " made an epic save";
         LOG(line);
         appendLog(line);
     }
     else if (statEvent.GetEventName() == "OwnGoal") {
-        std::string line = receiver.GetPlayerName().ToString() + " [" + receiverDescription + "]" + " scored an own goal";
+        std::string line = receiverDescription + " scored an own goal";
+        LOG(line);
+        appendLog(line);
+    }
+    else if (statEvent.GetEventName() == "BreakoutDamage") {
+        std::string line = receiverDescription + " scored dropshot damage";
+        LOG(line);
+        appendLog(line);
+    }
+    else if (statEvent.GetEventName() == "BreakoutDamageLarge") {
+        std::string line = receiverDescription + " scored large dropshot damage";
         LOG(line);
         appendLog(line);
     }
